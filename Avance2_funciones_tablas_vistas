@@ -1,0 +1,430 @@
+-- ============================================================
+-- SGPC - SC504 Lenguajes de Bases de Datos
+-- Autor: Engel García Murillo
+-- Tablas + 10 Vistas + 15 Funciones
+-- ============================================================
+
+-- TABLAS
+CREATE TABLE CARRERA (
+    id_carrera  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre      VARCHAR2(100) NOT NULL,
+    codigo      VARCHAR2(20)  NOT NULL UNIQUE,
+    estado      VARCHAR2(10)  DEFAULT 'ACTIVO'
+);
+
+CREATE TABLE ESCUELA (
+    id_escuela  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre      VARCHAR2(100) NOT NULL,
+    codigo      VARCHAR2(20)  NOT NULL UNIQUE,
+    estado      VARCHAR2(10)  DEFAULT 'ACTIVO'
+);
+
+CREATE TABLE CURSO (
+    id_curso         NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    codigo           VARCHAR2(20)  NOT NULL UNIQUE,
+    nombre           VARCHAR2(150) NOT NULL,
+    creditos         NUMBER(3)     NOT NULL,
+    horas_teoricas   NUMBER(3)     DEFAULT 0,
+    horas_practicas  NUMBER(3)     DEFAULT 0,
+    estado           VARCHAR2(10)  DEFAULT 'ACTIVO'
+);
+
+CREATE TABLE CURSO_CARRERA (
+    id_curso_carrera NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_curso         NUMBER NOT NULL REFERENCES CURSO(id_curso),
+    id_carrera       NUMBER NOT NULL REFERENCES CARRERA(id_carrera),
+    obligatorio      CHAR(1) DEFAULT 'S'
+);
+
+CREATE TABLE CICLO_ACADEMICO (
+    id_ciclo     NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    anio         NUMBER(4)    NOT NULL,
+    numero_ciclo NUMBER(1)    NOT NULL,
+    fecha_inicio DATE         NOT NULL,
+    fecha_fin    DATE         NOT NULL,
+    estado       VARCHAR2(10) DEFAULT 'ACTIVO'
+);
+
+CREATE TABLE USUARIO (
+    id_usuario     NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre         VARCHAR2(100) NOT NULL,
+    correo         VARCHAR2(150) NOT NULL UNIQUE,
+    contrasena     VARCHAR2(255) NOT NULL,
+    rol            VARCHAR2(30)  NOT NULL,
+    estado         VARCHAR2(10)  DEFAULT 'ACTIVO',
+    fecha_registro DATE          DEFAULT SYSDATE
+);
+
+CREATE TABLE PROGRAMA_CURSO (
+    id_programa    NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_curso       NUMBER NOT NULL REFERENCES CURSO(id_curso),
+    id_ciclo       NUMBER NOT NULL REFERENCES CICLO_ACADEMICO(id_ciclo),
+    id_usuario     NUMBER NOT NULL REFERENCES USUARIO(id_usuario),
+    version        NUMBER(3)    DEFAULT 1,
+    descripcion    CLOB,
+    bibliografia   CLOB,
+    objetivos      CLOB,
+    metodologia    CLOB,
+    evaluacion     CLOB,
+    contenidos     CLOB,
+    fecha_creacion DATE         DEFAULT SYSDATE,
+    estado         VARCHAR2(20) DEFAULT 'BORRADOR'
+);
+
+CREATE TABLE HISTORIAL_PROGRAMA (
+    id_historial       NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_programa        NUMBER NOT NULL REFERENCES PROGRAMA_CURSO(id_programa),
+    id_usuario         NUMBER NOT NULL REFERENCES USUARIO(id_usuario),
+    fecha_cambio       DATE         DEFAULT SYSDATE,
+    descripcion_cambio VARCHAR2(500),
+    version_anterior   NUMBER(3),
+    version_nueva      NUMBER(3),
+    accion             VARCHAR2(50)
+);
+
+CREATE TABLE SOLICITUD_CAMBIO_MAYOR (
+    id_solicitud     NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_programa      NUMBER NOT NULL REFERENCES PROGRAMA_CURSO(id_programa),
+    id_usuario       NUMBER NOT NULL REFERENCES USUARIO(id_usuario),
+    fecha_solicitud  DATE         DEFAULT SYSDATE,
+    justificacion    CLOB,
+    estado           VARCHAR2(20) DEFAULT 'PENDIENTE',
+    fecha_resolucion DATE
+);
+
+CREATE TABLE SOLICITUD_CAMBIO_MENOR (
+    id_solicitud     NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_programa      NUMBER NOT NULL REFERENCES PROGRAMA_CURSO(id_programa),
+    id_usuario       NUMBER NOT NULL REFERENCES USUARIO(id_usuario),
+    fecha_solicitud  DATE         DEFAULT SYSDATE,
+    descripcion      VARCHAR2(500),
+    estado           VARCHAR2(20) DEFAULT 'PENDIENTE',
+    fecha_resolucion DATE
+);
+
+CREATE TABLE NOTIFICACION (
+    id_notificacion NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_usuario      NUMBER NOT NULL REFERENCES USUARIO(id_usuario),
+    mensaje         VARCHAR2(500) NOT NULL,
+    tipo            VARCHAR2(30),
+    leido           CHAR(1)      DEFAULT 'N',
+    fecha_envio     DATE         DEFAULT SYSDATE
+);
+
+CREATE TABLE LOG_ACTIVIDAD (
+    id_log         NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_usuario     NUMBER REFERENCES USUARIO(id_usuario),
+    accion         VARCHAR2(100) NOT NULL,
+    tabla_afectada VARCHAR2(50),
+    fecha          DATE         DEFAULT SYSDATE,
+    detalle        VARCHAR2(500)
+);
+
+-- ============================================================
+-- 10 VISTAS
+-- ============================================================
+
+-- Vista 1: Programas con info completa
+CREATE OR REPLACE VIEW V_PROGRAMAS_COMPLETO AS
+SELECT p.id_programa,
+       c.codigo      AS codigo_curso,
+       c.nombre      AS nombre_curso,
+       c.creditos,
+       ca.anio,
+       ca.numero_ciclo,
+       u.nombre      AS docente,
+       p.version,
+       p.estado,
+       p.fecha_creacion
+FROM   PROGRAMA_CURSO p
+JOIN   CURSO           c  ON p.id_curso = c.id_curso
+JOIN   CICLO_ACADEMICO ca ON p.id_ciclo = ca.id_ciclo
+JOIN   USUARIO         u  ON p.id_usuario = u.id_usuario;
+
+-- Vista 2: Cursos activos por carrera
+CREATE OR REPLACE VIEW V_CURSOS_POR_CARRERA AS
+SELECT ca.nombre AS carrera,
+       c.codigo,
+       c.nombre  AS curso,
+       c.creditos,
+       cc.obligatorio
+FROM   CURSO_CARRERA cc
+JOIN   CARRERA ca ON cc.id_carrera = ca.id_carrera
+JOIN   CURSO   c  ON cc.id_curso   = c.id_curso
+WHERE  c.estado = 'ACTIVO'
+ORDER BY ca.nombre, c.nombre;
+
+-- Vista 3: Solicitudes de cambio mayor pendientes
+CREATE OR REPLACE VIEW V_SOL_MAYOR_PENDIENTES AS
+SELECT s.id_solicitud,
+       c.nombre   AS curso,
+       u.nombre   AS solicitante,
+       u.correo,
+       s.fecha_solicitud,
+       s.estado
+FROM   SOLICITUD_CAMBIO_MAYOR s
+JOIN   PROGRAMA_CURSO p ON s.id_programa = p.id_programa
+JOIN   CURSO          c ON p.id_curso    = c.id_curso
+JOIN   USUARIO        u ON s.id_usuario  = u.id_usuario
+WHERE  s.estado = 'PENDIENTE';
+
+-- Vista 4: Solicitudes de cambio menor pendientes
+CREATE OR REPLACE VIEW V_SOL_MENOR_PENDIENTES AS
+SELECT s.id_solicitud,
+       c.nombre   AS curso,
+       u.nombre   AS solicitante,
+       s.fecha_solicitud,
+       s.descripcion,
+       s.estado
+FROM   SOLICITUD_CAMBIO_MENOR s
+JOIN   PROGRAMA_CURSO p ON s.id_programa = p.id_programa
+JOIN   CURSO          c ON p.id_curso    = c.id_curso
+JOIN   USUARIO        u ON s.id_usuario  = u.id_usuario
+WHERE  s.estado = 'PENDIENTE';
+
+-- Vista 5: Historial de cambios
+CREATE OR REPLACE VIEW V_HISTORIAL_CAMBIOS AS
+SELECT h.id_historial,
+       c.nombre   AS curso,
+       u.nombre   AS usuario,
+       h.fecha_cambio,
+       h.accion,
+       h.version_anterior,
+       h.version_nueva,
+       h.descripcion_cambio
+FROM   HISTORIAL_PROGRAMA h
+JOIN   PROGRAMA_CURSO p ON h.id_programa = p.id_programa
+JOIN   CURSO          c ON p.id_curso    = c.id_curso
+JOIN   USUARIO        u ON h.id_usuario  = u.id_usuario
+ORDER BY h.fecha_cambio DESC;
+
+-- Vista 6: Notificaciones no leidas
+CREATE OR REPLACE VIEW V_NOTIFICACIONES_NO_LEIDAS AS
+SELECT n.id_notificacion,
+       u.nombre  AS usuario,
+       u.correo,
+       n.mensaje,
+       n.tipo,
+       n.fecha_envio
+FROM   NOTIFICACION n
+JOIN   USUARIO u ON n.id_usuario = u.id_usuario
+WHERE  n.leido = 'N'
+ORDER BY n.fecha_envio DESC;
+
+-- Vista 7: Resumen de programas por ciclo
+CREATE OR REPLACE VIEW V_RESUMEN_CICLO AS
+SELECT ca.anio,
+       ca.numero_ciclo,
+       COUNT(p.id_programa)                                     AS total_programas,
+       SUM(CASE WHEN p.estado = 'APROBADO' THEN 1 ELSE 0 END)  AS aprobados,
+       SUM(CASE WHEN p.estado = 'BORRADOR' THEN 1 ELSE 0 END)  AS borradores,
+       SUM(CASE WHEN p.estado = 'REVISION' THEN 1 ELSE 0 END)  AS en_revision
+FROM   CICLO_ACADEMICO ca
+LEFT JOIN PROGRAMA_CURSO p ON ca.id_ciclo = p.id_ciclo
+GROUP BY ca.anio, ca.numero_ciclo
+ORDER BY ca.anio DESC, ca.numero_ciclo DESC;
+
+-- Vista 8: Usuarios activos
+CREATE OR REPLACE VIEW V_USUARIOS_ACTIVOS AS
+SELECT id_usuario, nombre, correo, rol, fecha_registro
+FROM   USUARIO
+WHERE  estado = 'ACTIVO'
+ORDER BY rol, nombre;
+
+-- Vista 9: Log de actividad reciente (30 dias)
+CREATE OR REPLACE VIEW V_LOG_RECIENTE AS
+SELECT l.id_log,
+       u.nombre  AS usuario,
+       l.accion,
+       l.tabla_afectada,
+       l.fecha,
+       l.detalle
+FROM   LOG_ACTIVIDAD l
+LEFT JOIN USUARIO u ON l.id_usuario = u.id_usuario
+WHERE  l.fecha >= SYSDATE - 30
+ORDER BY l.fecha DESC;
+
+-- Vista 10: Cursos sin programa en ciclo activo
+CREATE OR REPLACE VIEW V_CURSOS_SIN_PROGRAMA AS
+SELECT c.id_curso, c.codigo, c.nombre, c.creditos
+FROM   CURSO c
+WHERE  c.estado = 'ACTIVO'
+  AND  c.id_curso NOT IN (
+       SELECT p.id_curso
+       FROM   PROGRAMA_CURSO p
+       JOIN   CICLO_ACADEMICO ca ON p.id_ciclo = ca.id_ciclo
+       WHERE  ca.estado = 'ACTIVO');
+
+-- ============================================================
+-- 15 FUNCIONES
+-- ============================================================
+
+-- Función 1: Nombre del ciclo academico
+CREATE OR REPLACE FUNCTION FN_NOMBRE_CICLO(p_id_ciclo IN NUMBER)
+RETURN VARCHAR2 IS
+    v_res VARCHAR2(50);
+BEGIN
+    SELECT anio || '-' || numero_ciclo INTO v_res
+    FROM CICLO_ACADEMICO WHERE id_ciclo = p_id_ciclo;
+    RETURN v_res;
+EXCEPTION WHEN NO_DATA_FOUND THEN RETURN 'NO ENCONTRADO';
+END;
+/
+
+-- Función 2: Total de programas de un curso
+CREATE OR REPLACE FUNCTION FN_TOTAL_PROGRAMAS_CURSO(p_id_curso IN NUMBER)
+RETURN NUMBER IS
+    v_total NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_total FROM PROGRAMA_CURSO WHERE id_curso = p_id_curso;
+    RETURN v_total;
+END;
+/
+
+-- Función 3: Verificar si un curso existe por código
+CREATE OR REPLACE FUNCTION FN_EXISTE_CURSO(p_codigo IN VARCHAR2)
+RETURN CHAR IS
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM CURSO WHERE codigo = p_codigo;
+    IF v_count > 0 THEN RETURN 'S'; ELSE RETURN 'N'; END IF;
+END;
+/
+
+-- Función 4: Versión actual de un programa
+CREATE OR REPLACE FUNCTION FN_VERSION_ACTUAL(p_id_programa IN NUMBER)
+RETURN NUMBER IS
+    v_version NUMBER;
+BEGIN
+    SELECT version INTO v_version FROM PROGRAMA_CURSO WHERE id_programa = p_id_programa;
+    RETURN v_version;
+EXCEPTION WHEN NO_DATA_FOUND THEN RETURN 0;
+END;
+/
+
+-- Función 5: Notificaciones pendientes de un usuario
+CREATE OR REPLACE FUNCTION FN_NOTIF_PENDIENTES(p_id_usuario IN NUMBER)
+RETURN NUMBER IS
+    v_total NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_total FROM NOTIFICACION
+    WHERE id_usuario = p_id_usuario AND leido = 'N';
+    RETURN v_total;
+END;
+/
+
+-- Función 6: Verificar si un correo ya existe
+CREATE OR REPLACE FUNCTION FN_EXISTE_USUARIO(p_correo IN VARCHAR2)
+RETURN CHAR IS
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM USUARIO WHERE correo = p_correo;
+    IF v_count > 0 THEN RETURN 'S'; ELSE RETURN 'N'; END IF;
+END;
+/
+
+-- Función 7: Total de créditos de una carrera
+CREATE OR REPLACE FUNCTION FN_CREDITOS_CARRERA(p_id_carrera IN NUMBER)
+RETURN NUMBER IS
+    v_total NUMBER;
+BEGIN
+    SELECT SUM(c.creditos) INTO v_total
+    FROM CURSO_CARRERA cc JOIN CURSO c ON cc.id_curso = c.id_curso
+    WHERE cc.id_carrera = p_id_carrera AND c.estado = 'ACTIVO';
+    RETURN NVL(v_total, 0);
+END;
+/
+
+-- Función 8: Estado de un programa
+CREATE OR REPLACE FUNCTION FN_ESTADO_PROGRAMA(p_id_programa IN NUMBER)
+RETURN VARCHAR2 IS
+    v_estado VARCHAR2(20);
+BEGIN
+    SELECT estado INTO v_estado FROM PROGRAMA_CURSO WHERE id_programa = p_id_programa;
+    RETURN v_estado;
+EXCEPTION WHEN NO_DATA_FOUND THEN RETURN 'NO EXISTE';
+END;
+/
+
+-- Función 9: Solicitudes pendientes de un programa
+CREATE OR REPLACE FUNCTION FN_SOLICITUDES_PENDIENTES(p_id_programa IN NUMBER)
+RETURN NUMBER IS
+    v_mayor NUMBER;
+    v_menor NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_mayor FROM SOLICITUD_CAMBIO_MAYOR
+    WHERE id_programa = p_id_programa AND estado = 'PENDIENTE';
+    SELECT COUNT(*) INTO v_menor FROM SOLICITUD_CAMBIO_MENOR
+    WHERE id_programa = p_id_programa AND estado = 'PENDIENTE';
+    RETURN v_mayor + v_menor;
+END;
+/
+
+-- Función 10: Nombre del docente de un programa
+CREATE OR REPLACE FUNCTION FN_DOCENTE_PROGRAMA(p_id_programa IN NUMBER)
+RETURN VARCHAR2 IS
+    v_nombre VARCHAR2(100);
+BEGIN
+    SELECT u.nombre INTO v_nombre
+    FROM PROGRAMA_CURSO p JOIN USUARIO u ON p.id_usuario = u.id_usuario
+    WHERE p.id_programa = p_id_programa;
+    RETURN v_nombre;
+EXCEPTION WHEN NO_DATA_FOUND THEN RETURN 'SIN DOCENTE';
+END;
+/
+
+-- Función 11: Verificar si un ciclo está activo
+CREATE OR REPLACE FUNCTION FN_CICLO_ACTIVO(p_id_ciclo IN NUMBER)
+RETURN CHAR IS
+    v_estado VARCHAR2(10);
+BEGIN
+    SELECT estado INTO v_estado FROM CICLO_ACADEMICO WHERE id_ciclo = p_id_ciclo;
+    IF v_estado = 'ACTIVO' THEN RETURN 'S'; ELSE RETURN 'N'; END IF;
+EXCEPTION WHEN NO_DATA_FOUND THEN RETURN 'N';
+END;
+/
+
+-- Función 12: Cursos obligatorios de una carrera
+CREATE OR REPLACE FUNCTION FN_CURSOS_OBLIGATORIOS(p_id_carrera IN NUMBER)
+RETURN NUMBER IS
+    v_total NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_total FROM CURSO_CARRERA
+    WHERE id_carrera = p_id_carrera AND obligatorio = 'S';
+    RETURN v_total;
+END;
+/
+
+-- Función 13: Obtener el id del ciclo activo actual
+CREATE OR REPLACE FUNCTION FN_CICLO_ACTUAL
+RETURN NUMBER IS
+    v_id NUMBER;
+BEGIN
+    SELECT id_ciclo INTO v_id FROM CICLO_ACADEMICO
+    WHERE estado = 'ACTIVO' AND ROWNUM = 1;
+    RETURN v_id;
+EXCEPTION WHEN NO_DATA_FOUND THEN RETURN NULL;
+END;
+/
+
+-- Función 14: Programas aprobados en un ciclo
+CREATE OR REPLACE FUNCTION FN_PROGRAMAS_APROBADOS(p_id_ciclo IN NUMBER)
+RETURN NUMBER IS
+    v_total NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_total FROM PROGRAMA_CURSO
+    WHERE id_ciclo = p_id_ciclo AND estado = 'APROBADO';
+    RETURN v_total;
+END;
+/
+
+-- Función 15: Validar rol de un usuario
+CREATE OR REPLACE FUNCTION FN_VALIDAR_ROL(p_id_usuario IN NUMBER, p_rol IN VARCHAR2)
+RETURN CHAR IS
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM USUARIO
+    WHERE id_usuario = p_id_usuario AND rol = p_rol AND estado = 'ACTIVO';
+    IF v_count > 0 THEN RETURN 'S'; ELSE RETURN 'N'; END IF;
+END;
+/
